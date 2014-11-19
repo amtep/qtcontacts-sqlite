@@ -22,6 +22,7 @@ INCLUDEPATH += \
         ../extensions
 
 HEADERS += \
+        querybuilder_p.h \
         memorytable_p.h \
         semaphore_p.h \
         trace_p.h \
@@ -36,6 +37,7 @@ HEADERS += \
         ../extensions/contactmanagerengine.h
 
 SOURCES += \
+        querybuilder_p.cpp \
         memorytable.cpp \
         semaphore_p.cpp \
         conversion.cpp \
