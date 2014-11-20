@@ -3318,7 +3318,8 @@ QContactManager::Error ContactWriter::updateOrCreateAggregate(QContact *contact,
         3) perform the heuristic matching, ordered by "best score"
         4) select highest score; if over threshold, select that as aggregate.
         */
-        static const char *possibleAggregatesWhere = /* SELECT contactId FROM Contacts ... */
+        static const char *possibleAggregatesQuery = 
+            "SELECT Contacts.contactId FROM Contacts "
             " WHERE Contacts.syncTarget = 'aggregate'"
             " AND (COALESCE(Contacts.lowerLastName, '') = '' OR COALESCE(:lastName, '') = '' OR Contacts.lowerLastName = :lastName)"
             " AND COALESCE(Contacts.gender, '') != :excludeGender"
@@ -3328,7 +3329,8 @@ QContactManager::Error ContactWriter::updateOrCreateAggregate(QContact *contact,
                 " SELECT secondId FROM Relationships WHERE firstId = :contactId AND type = 'IsNot'"
                 " UNION"
                 " SELECT firstId FROM Relationships WHERE secondId = :contactId AND type = 'IsNot'"
-            " )";
+            " )"
+            " ORDER BY contactId ASC";
 
         // Use a simple match algorithm, looking for exact matches on name fields,
         // or accumulating points for name matches (including partial matches of first name).
@@ -3336,14 +3338,12 @@ QContactManager::Error ContactWriter::updateOrCreateAggregate(QContact *contact,
         // step one: build the temporary table which contains all "possible" aggregate contact ids.
         m_database.clearTemporaryContactIdsTable(possibleAggregatesTable);
 
-        QString orderBy = QLatin1String("contactId ASC ");
-        QString where = QLatin1String(possibleAggregatesWhere);
         QMap<QString, QVariant> bindings;
         bindings.insert(":lastName", lastName);
         bindings.insert(":contactId", ContactId::databaseId(*contact));
         bindings.insert(":excludeGender", excludeGender);
         if (!m_database.createTemporaryContactIdsTable(possibleAggregatesTable,
-                                                              QString(), where, orderBy, bindings)) {
+                QString::fromLatin1(possibleAggregatesQuery), bindings)) {
             QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Error creating possibleAggregates temporary table"));
             return QContactManager::UnspecifiedError;
         }

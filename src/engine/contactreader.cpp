@@ -32,6 +32,7 @@
 #include "contactreader.h"
 #include "contactsengine.h"
 #include "conversion_p.h"
+#include "querybuilder_p.h"
 #include "trace_p.h"
 
 #include "../extensions/qtcontacts-extensions.h"
@@ -670,13 +671,6 @@ struct DetailInfo
     {
         return table ? QString::fromLatin1("EXISTS (SELECT contactId FROM %1 where contactId = Contacts.contactId)").arg(QLatin1String(table))
                      : QString::fromLatin1("Contacts.contactId != 0");
-    }
-
-    QString orderByExistence(bool asc) const
-    {
-        return table ? QString::fromLatin1("CASE EXISTS (SELECT contactId FROM %1 where contactId = Contacts.contactId) WHEN 1 THEN %2 ELSE %3 END")
-                       .arg(QLatin1String(table)).arg(asc ? 0 : 1).arg(asc ? 1 : 0)
-                     : QString();
     }
 };
 
@@ -1368,33 +1362,61 @@ static QString buildWhere(const QContactFilter &filter, ContactsDatabase &db, co
     }
 }
 
-static QString buildOrderBy(const QContactSortOrder &order, QStringList *joins, bool *transientModifiedRequired, bool *globalPresenceRequired, bool useLocale)
+static void buildOrderBy(const QContactSortOrder &order, QueryBuilder *qb, bool *transientModifiedRequired, bool *globalPresenceRequired, bool useLocale)
 {
-    Q_ASSERT(joins);
+    Q_ASSERT(qb);
     Q_ASSERT(transientModifiedRequired);
     Q_ASSERT(globalPresenceRequired);
 
     const DetailInfo &detail(detailInformation(order.detailType()));
     if (detail.detailType == QContactDetail::TypeUndefined) {
         QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Cannot buildOrderBy with unknown detail type: %1").arg(order.detailType()));
-        return QString();
+        return;
     }
 
     if (order.detailField() == invalidField) {
         // If there is no field, we're simply sorting by the existence or otherwise of the detail
-        return detail.orderByExistence(order.direction() == Qt::AscendingOrder);
+        // FIXME: There's no actual spec for this in the documentation,
+        // and the logic here is different from what
+        // QContactManagerEngine::compareContact() does.
+        if (detail.table) {
+            const static QString existtempl = QString::fromLatin1(
+                "EXISTS (SELECT contactId FROM %1 WHERE contactId = Contacts.contactId)");
+            // EXISTS returns 1 for existence and 0 for nonexistence,
+            // while the sort-by-existence logic wants to sort existence
+            // before nonexistence, so the effective direction is reversed.
+            Qt::SortOrder rev = (order.direction() == Qt::AscendingOrder)
+                ? Qt::DescendingOrder : Qt::AscendingOrder;
+            qb->orderBy(existtempl.arg(QLatin1String(detail.table)), rev);
+        }
+        return;
     }
 
     const FieldInfo &field(fieldInformation(detail, order.detailField()));
     if (field.field == invalidField) {
         QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Cannot buildOrderBy with unknown detail field: %1").arg(order.detailField()));
-        return QString();
+        return;
+    }
+
+    if (detail.joinToSort)
+        qb->leftJoinUsing(QLatin1String(detail.table), QStringLiteral("contactId"));
+
+    if (detail.table && !detail.joinToSort) {
+        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("UNSUPPORTED SORTING: no join and not primary table for ORDER BY in query with: %1, %2")
+                   .arg(order.detailType()).arg(order.detailField()));
     }
 
     QString sortExpression(QStringLiteral("%1.%2").arg(detail.joinToSort ? detail.table : QStringLiteral("Contacts")).arg(field.column));
     bool sortBlanks = true;
-    bool collate = true;
-    bool localized = field.fieldType == LocalizedField;
+    QString collation;
+
+    if (field.fieldType == LocalizedField && useLocale) {
+        collation = QStringLiteral("localeCollation");
+    } else if (order.caseSensitivity() == Qt::CaseSensitive) {
+        collation = QStringLiteral("RTRIM");
+    } else {
+        collation = QStringLiteral("NOCASE");
+    }
 
     // Special case for accessing transient data
     if (detail.detailType == detailIdentifier<QContactGlobalPresence>() &&
@@ -1405,7 +1427,7 @@ static QString buildOrderBy(const QContactSortOrder &order, QStringList *joins, 
         // Look at the temporary state value if present, otherwise use the normal value
         sortExpression = QStringLiteral("COALESCE(temp.GlobalPresenceStates.presenceState, GlobalPresences.presenceState)");
         sortBlanks = false;
-        collate = false;
+        collation = QString();
 
 #ifdef SORT_PRESENCE_BY_AVAILABILITY
         // The order we want is Available(1),Away(4),ExtendedAway(5),Busy(3),Hidden(2),Offline(6),Unknown(0)
@@ -1424,71 +1446,33 @@ static QString buildOrderBy(const QContactSortOrder &order, QStringList *joins, 
         // Look at the temporary modified timestamp if present, otherwise use the normal value
         sortExpression = QStringLiteral("COALESCE(temp.Timestamps.modified, modified)");
         sortBlanks = false;
-        collate = false;
+        collation = QString();
     }
-
-    QString result;
 
     if (sortBlanks) {
         QString blanksLocation = (order.blankPolicy() == QContactSortOrder::BlanksLast)
-                ? QLatin1String("CASE WHEN COALESCE(%1, '') = '' THEN 1 ELSE 0 END, ")
-                : QLatin1String("CASE WHEN COALESCE(%1, '') = '' THEN 0 ELSE 1 END, ");
-        result = blanksLocation.arg(sortExpression);
+                ? QLatin1String("CASE WHEN COALESCE(%1, '') = '' THEN 1 ELSE 0 END")
+                : QLatin1String("CASE WHEN COALESCE(%1, '') = '' THEN 0 ELSE 1 END");
+        qb->orderBy(blanksLocation.arg(sortExpression));
     }
 
-    result.append(sortExpression);
-
-    if (collate) {
-        if (localized && useLocale) {
-            result.append(QLatin1String(" COLLATE localeCollation"));
-        } else {
-            result.append((order.caseSensitivity() == Qt::CaseSensitive) ? QLatin1String(" COLLATE RTRIM") : QLatin1String(" COLLATE NOCASE"));
-        }
-    }
-
-    result.append((order.direction() == Qt::AscendingOrder) ? QLatin1String(" ASC") : QLatin1String(" DESC"));
-
-    if (detail.joinToSort) {
-        QString join = QString(QLatin1String(
-                "LEFT JOIN %1 ON Contacts.contactId = %1.contactId"))
-                .arg(QLatin1String(detail.table));
-
-        if (!joins->contains(join))
-            joins->append(join);
-
-        return result;
-    } else if (!detail.table) {
-        return result;
-    } else {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("UNSUPPORTED SORTING: no join and not primary table for ORDER BY in query with: %1, %2")
-                   .arg(order.detailType()).arg(order.detailField()));
-    }
-
-    return QString();
+    qb->orderBy(sortExpression, order.direction(), collation);
 }
 
-static QString buildOrderBy(const QList<QContactSortOrder> &order, QString *join, bool *transientModifiedRequired, bool *globalPresenceRequired, bool useLocale)
+static void buildOrderBy(const QList<QContactSortOrder> &order, QueryBuilder *qb, bool *transientModifiedRequired, bool *globalPresenceRequired, bool useLocale)
 {
-    Q_ASSERT(join);
+    Q_ASSERT(qb);
     Q_ASSERT(transientModifiedRequired);
     Q_ASSERT(globalPresenceRequired);
 
     if (order.isEmpty())
-        return QString();
+        return;
 
-    QStringList joins;
-    QStringList fragments;
     foreach (const QContactSortOrder &sort, order) {
-        const QString fragment = buildOrderBy(sort, &joins, transientModifiedRequired, globalPresenceRequired, useLocale);
-        if (!fragment.isEmpty()) {
-            fragments.append(fragment);
-        }
+        buildOrderBy(sort, qb, transientModifiedRequired, globalPresenceRequired, useLocale);
     }
 
-    *join = joins.join(QLatin1String(" "));
-
-    fragments.append(QLatin1String("displayLabel"));
-    return fragments.join(QLatin1String(", "));
+    qb->orderBy(QStringLiteral("displayLabel"));
 }
 
 static void debugFilterExpansion(const QString &description, const QString &query, const QVariantList &bindings)
@@ -1777,10 +1761,7 @@ QString expandWhere(const QString &where, const QContactFilter &filter, const bo
         emptyFilter = strippedWhere.isEmpty();
     }
 
-    if (emptyFilter && constraints.isEmpty())
-        return QString();
-
-    QString whereClause(QString::fromLatin1("WHERE "));
+    QString whereClause;
     if (!constraints.isEmpty()) {
         whereClause += constraints.join(QLatin1String("AND "));
         if (!emptyFilter) {
@@ -1807,10 +1788,12 @@ QContactManager::Error ContactReader::readContacts(
 
     m_database.clearTemporaryContactIdsTable(table);
 
-    QString join;
+    QueryBuilder qb(QStringLiteral("Contacts"));
+    qb.queryField(QStringLiteral("Contacts"), QStringLiteral("contactId"));
+
     bool transientModifiedRequired = false;
     bool globalPresenceRequired = false;
-    const QString orderBy = buildOrderBy(order, &join, &transientModifiedRequired, &globalPresenceRequired, m_database.localized());
+    buildOrderBy(order, &qb, &transientModifiedRequired, &globalPresenceRequired, m_database.localized());
 
     bool whereFailed = false;
     QVariantList bindings;
@@ -1829,17 +1812,18 @@ QContactManager::Error ContactReader::readContacts(
         }
 
         if (transientModifiedRequired) {
-            join.append(QStringLiteral(" LEFT JOIN temp.Timestamps ON Contacts.contactId = temp.Timestamps.contactId"));
+            qb.leftJoinUsing(QStringLiteral("temp.Timestamps"), QStringLiteral("contactId"));
         }
         if (globalPresenceRequired) {
-            join.append(QStringLiteral(" LEFT JOIN temp.GlobalPresenceStates ON Contacts.contactId = temp.GlobalPresenceStates.contactId"));
+            qb.leftJoinUsing(QStringLiteral("temp.GlobalPresenceStates"), QStringLiteral("contactId"));
         }
     }
 
-    const int maximumCount = fetchHint.maxCountHint();
+    qb.andWhere(where);
+    qb.setLimit(fetchHint.maxCountHint());
 
     QContactManager::Error error = QContactManager::NoError;
-    if (!m_database.createTemporaryContactIdsTable(table, join, where, orderBy, bindings, maximumCount)) {
+    if (!m_database.createTemporaryContactIdsTable(table, qb.toString(), bindings)) {
         error = QContactManager::UnspecifiedError;
     } else {
         error = queryContacts(table, contacts, fetchHint);
@@ -1873,36 +1857,41 @@ QContactManager::Error ContactReader::readContacts(
 {
     QMutexLocker locker(m_database.accessMutex());
 
+    int maximumCount = fetchHint.maxCountHint();
+    if (maximumCount <= 0 || maximumCount > databaseIds.size())
+        maximumCount = databaseIds.size();
+
     QVariantList boundIds;
-    boundIds.reserve(databaseIds.size());
+    boundIds.reserve(maximumCount);
     foreach (quint32 id, databaseIds) {
         boundIds.append(id);
+        if (boundIds.size() == maximumCount)
+            break;
     }
-
-    contacts->reserve(databaseIds.size());
 
     m_database.clearTemporaryContactIdsTable(table);
 
-    const int maximumCount = fetchHint.maxCountHint();
-
     QContactManager::Error error = QContactManager::NoError;
-    if (!m_database.createTemporaryContactIdsTable(table, boundIds, maximumCount)) {
+    if (!m_database.createTemporaryContactIdsTable(table, boundIds)) {
         error = QContactManager::UnspecifiedError;
     } else {
+        contacts->reserve(databaseIds.size());
         error = queryContacts(table, contacts, fetchHint, relaxConstraints);
     }
 
     // the ordering of the queried contacts is identical to
     // the ordering of the input contact ids list.
+    // fill any holes left by nonexisting contact ids, and
+    // extend the contacts list if necessary
     int contactIdsSize = databaseIds.size();
     int contactsSize = contacts->size();
     if (contactIdsSize != contactsSize) {
         for (int i = 0; i < contactIdsSize; ++i) {
             if (i >= contactsSize || ContactId::databaseId((*contacts)[i].id()) != databaseIds[i]) {
-                // the id list contained a contact id which doesn't exist
                 contacts->insert(i, QContact());
                 contactsSize++;
-                error = QContactManager::DoesNotExistError;
+                if (i < maximumCount)
+                    error = QContactManager::DoesNotExistError;
             }
         }
     }
@@ -2413,10 +2402,12 @@ QContactManager::Error ContactReader::readContactIds(
 
     m_database.clearTransientContactIdsTable(tableName);
 
-    QString join;
+    QueryBuilder qb(QStringLiteral("Contacts"));
+    qb.queryField(QStringLiteral("Contacts"), QStringLiteral("contactId"));
+
     bool transientModifiedRequired = false;
     bool globalPresenceRequired = false;
-    const QString orderBy = buildOrderBy(order, &join, &transientModifiedRequired, &globalPresenceRequired, m_database.localized());
+    buildOrderBy(order, &qb, &transientModifiedRequired, &globalPresenceRequired, m_database.localized());
 
     bool failed = false;
     QVariantList bindings;
@@ -2435,23 +2426,19 @@ QContactManager::Error ContactReader::readContactIds(
         }
 
         if (transientModifiedRequired) {
-            join.append(QStringLiteral(" LEFT JOIN temp.Timestamps ON Contacts.contactId = temp.Timestamps.contactId"));
+            qb.leftJoinUsing(QStringLiteral("temp.Timestamps"), QStringLiteral("contactId"));
         }
         if (globalPresenceRequired) {
-            join.append(QStringLiteral(" LEFT JOIN temp.GlobalPresenceStates ON Contacts.contactId = temp.GlobalPresenceStates.contactId"));
+            qb.leftJoinUsing(QStringLiteral("temp.GlobalPresenceStates"), QStringLiteral("contactId"));
         }
     }
 
-    QString queryString = QString(QLatin1String(
-                "\n SELECT DISTINCT Contacts.contactId"
-                "\n FROM Contacts %1"
-                "\n %2")).arg(join).arg(where);
-    if (!orderBy.isEmpty()) {
-        queryString.append(QString::fromLatin1(" ORDER BY ") + orderBy);
-    }
+    qb.setDistinct(true); // TODO: is this really needed?
+    qb.andWhere(where);
 
     QSqlQuery query(m_database);
     query.setForwardOnly(true);
+    QString queryString = qb.toString();
     if (!query.prepare(queryString)) {
         QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare contacts ids:\n%1\nQuery:\n%2")
                 .arg(query.lastError().text())

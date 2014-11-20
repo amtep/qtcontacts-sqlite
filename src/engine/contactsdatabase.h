@@ -122,9 +122,9 @@ public:
     bool commitTransaction();
     bool rollbackTransaction();
 
-    bool createTemporaryContactIdsTable(const QString &table, const QVariantList &boundIds, int limit = 0);
-    bool createTemporaryContactIdsTable(const QString &table, const QString &join, const QString &where, const QString &orderBy, const QVariantList &boundValues, int limit = 0);
-    bool createTemporaryContactIdsTable(const QString &table, const QString &join, const QString &where, const QString &orderBy, const QMap<QString, QVariant> &boundValues, int limit = 0);
+    bool createTemporaryContactIdsTable(const QString &table, const QVariantList &boundIds);
+    bool createTemporaryContactIdsTable(const QString &table, const QString &query, const QVariantList &boundValues);
+    bool createTemporaryContactIdsTable(const QString &table, const QString &query, const QMap<QString, QVariant> &boundValues);
 
     void clearTemporaryContactIdsTable(const QString &table);
 
