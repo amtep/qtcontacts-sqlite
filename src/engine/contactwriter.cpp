@@ -1134,39 +1134,12 @@ static bool detailValuesEqual(const QContactDetail &lhs, const QContactDetail &r
     return true;
 }
 
-static bool detailValuesSuperset(const QContactDetail &lhs, const QContactDetail &rhs)
-{
-    // True if all values in rhs are present in lhs
-    const DetailMap lhsValues(detailValues(lhs, false));
-    const DetailMap rhsValues(detailValues(rhs, false));
-
-    if (lhsValues.count() < rhsValues.count()) {
-        return false;
-    }
-
-    foreach (const DetailMap::key_type &key, rhsValues.keys()) {
-        if (!variantEqual(lhsValues[key], rhsValues[key])) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 static bool detailsEquivalent(const QContactDetail &lhs, const QContactDetail &rhs)
 {
     // Same as operator== except ignores differences in accessConstraints values
     if (detailType(lhs) != detailType(rhs))
         return false;
     return detailValuesEqual(lhs, rhs);
-}
-
-static bool detailsSuperset(const QContactDetail &lhs, const QContactDetail &rhs)
-{
-    // True is lhs is a superset of rhs
-    if (detailType(lhs) != detailType(rhs))
-        return false;
-    return detailValuesSuperset(lhs, rhs);
 }
 
 QContactManager::Error ContactWriter::fetchSyncContacts(const QString &syncTarget, const QDateTime &lastSync, const QList<QContactId> &exportedIds,
