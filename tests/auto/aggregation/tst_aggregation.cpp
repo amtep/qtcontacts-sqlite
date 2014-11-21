@@ -6648,5 +6648,5 @@ void tst_Aggregation::testSyncAdapter()
     }
 }
 
-QTEST_MAIN(tst_Aggregation)
+QTEST_GUILESS_MAIN(tst_Aggregation)
 #include "tst_aggregation.moc"
