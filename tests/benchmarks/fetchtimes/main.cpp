@@ -49,6 +49,8 @@
 #include <QElapsedTimer>
 #include <QtDebug>
 
+#include "../../../src/extensions/qtcontacts-extensions.h"
+
 QTCONTACTS_USE_NAMESPACE
 
 #include <QContactIdFilter>
@@ -347,9 +349,60 @@ int main(int argc, char  *argv[])
         qDebug() << i << ": Max count fetch completed in" << elapsed << "ms";
         elapsedTimeTotal += elapsed;
     }
+
+    // Time some address lookups
+    for (int i = 0; i < 3; ++i) {
+        request.setFilter(QContactPhoneNumber::match("1570795326")); // arbitrary number
+
+        QElapsedTimer timer;
+        timer.start();
+        request.start();
+        request.waitForFinished();
+
+        qint64 elapsed = timer.elapsed();
+        qDebug() << i << ": Phone number lookup completed in " << elapsed << "ms";
+        elapsedTimeTotal += elapsed;
+    }
+    for (int i = 0; i < 3; ++i) {
+        QContactDetailFilter filter;
+        filter.setDetailType(QContactEmailAddress::Type, QContactEmailAddress::FieldEmailAddress);
+        filter.setMatchFlags(QContactFilter::MatchExactly | QContactFilter::MatchFixedString);
+        filter.setValue("example@example.com");
+
+        request.setFilter(filter);
+
+        QElapsedTimer timer;
+        timer.start();
+        request.start();
+        request.waitForFinished();
+
+        qint64 elapsed = timer.elapsed();
+        qDebug() << i << ": Email address lookup completed in " << elapsed << "ms";
+        elapsedTimeTotal += elapsed;
+    }
+    for (int i = 0; i < 3; ++i) {
+        QContactDetailFilter filter1;
+        filter1.setDetailType(QContactOnlineAccount::Type, QContactOnlineAccount__FieldAccountPath);
+        filter1.setValue("/example/jabber/0");
+
+        QContactDetailFilter filter2;
+        filter2.setDetailType(QContactOnlineAccount::Type, QContactOnlineAccount::FieldAccountUri);
+        filter2.setMatchFlags(QContactFilter::MatchExactly | QContactFilter::MatchFixedString);
+        filter2.setValue("example@example.com");
+
+        request.setFilter(filter1 & filter2);
+
+        QElapsedTimer timer;
+        timer.start();
+        request.start();
+        request.waitForFinished();
+
+        qint64 elapsed = timer.elapsed();
+        qDebug() << i << ": Online account lookup completed in " << elapsed << "ms";
+        elapsedTimeTotal += elapsed;
+    }
+
     qint64 asyncTotalElapsed = asyncTotalTimer.elapsed();
-
-
 
     // Time some synchronous operations.  First, generate the test data.
     qsrand((int)asyncTotalElapsed);
