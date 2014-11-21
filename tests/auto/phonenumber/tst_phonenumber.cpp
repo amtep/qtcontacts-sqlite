@@ -440,5 +440,5 @@ void tst_PhoneNumber::normalization()
     }
 }
 
-QTEST_MAIN(tst_PhoneNumber)
+QTEST_GUILESS_MAIN(tst_PhoneNumber)
 #include "tst_phonenumber.moc"
