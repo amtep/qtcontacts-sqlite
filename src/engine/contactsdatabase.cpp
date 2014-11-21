@@ -507,6 +507,9 @@ static const char *createEmailAddressesIndex =
 static const char *createOnlineAccountsIndex =
         "\n CREATE INDEX OnlineAccountsIndex ON OnlineAccounts(lowerAccountUri);";
 
+static const char *createOnlineAccountsPathIndex =
+        "\n CREATE INDEX OnlineAccountsPathIndex ON OnlineAccounts(accountPath);";
+
 static const char *createNicknamesIndex =
         "\n CREATE INDEX NicknamesIndex ON Nicknames(lowerNickname);";
 
@@ -544,6 +547,7 @@ static const char *createAnalyzeData3 =
         "\n   ('Details', 'DetailsRemoveIndex', '25000 6 2'),"
         "\n   ('Presences','PresencesDetailsContactIdIndex','1000 2'),"
         "\n   ('OnlineAccounts','OnlineAccountsIndex','1000 3'),"
+        "\n   ('OnlineAccounts','OnlineAccountsPathIndex','1000 500'),"
         "\n   ('OnlineAccounts','OnlineAccountsDetailsContactIdIndex','1000 2'),"
         "\n   ('Nicknames','NicknamesIndex','2000 4'),"
         "\n   ('Nicknames','NicknamesDetailsContactIdIndex','2000 2'),"
@@ -634,6 +638,7 @@ static const char *createStatements[] =
     createPhoneNumbersIndex,
     createEmailAddressesIndex,
     createOnlineAccountsIndex,
+    createOnlineAccountsPathIndex,
     createNicknamesIndex,
     createOriginMetadataIdIndex,
     createOriginMetadataGroupIdIndex,
@@ -1260,6 +1265,13 @@ static const char *upgradeVersion14[] = {
     "PRAGMA user_version=15",
     0 // NULL-terminated
 };
+static const char *upgradeVersion15[] = {
+    createOnlineAccountsPathIndex,
+    "DELETE FROM sqlite_stat1 WHERE tbl = 'OnlineAccounts' AND idx = 'OnlineAccountsPathIndex'",
+    "INSERT INTO sqlite_stat1 VALUES ('OnlineAccounts','OnlineAccountsPathIndex','1000 500')",
+    "PRAGMA user_version=16",
+    0 // NULL-terminated
+};
 
 typedef bool (*UpgradeFunction)(QSqlDatabase &database);
 
@@ -1340,9 +1352,10 @@ static UpgradeOperation upgradeVersions[] = {
     { 0,                        upgradeVersion12 },
     { 0,                        upgradeVersion13 },
     { 0,                        upgradeVersion14 },
+    { 0,                        upgradeVersion15 },
 };
 
-static const int currentSchemaVersion = 15;
+static const int currentSchemaVersion = 16;
 
 static bool execute(QSqlDatabase &database, const QString &statement)
 {
