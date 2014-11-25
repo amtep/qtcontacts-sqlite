@@ -286,6 +286,7 @@ int main(int argc, char  *argv[])
     // Perform an initial request to ensure the database has been created before we start timing
     request.start();
     request.waitForFinished();
+    qDebug() << "Database contains" << request.contacts().size() << "contacts";
 
     qint64 elapsedTimeTotal = 0;
 
@@ -351,36 +352,55 @@ int main(int argc, char  *argv[])
     }
 
     // Time some address lookups
-    for (int i = 0; i < 3; ++i) {
-        request.setFilter(QContactPhoneNumber::match("1570795326")); // arbitrary number
+    const int batchSize = 20;
+    QContactFetchRequest requests[batchSize];
+    for (int i = 0; i < batchSize; ++i) {
+        QContactFetchHint hint;
+        hint.setOptimizationHints(QContactFetchHint::NoRelationships);
+        requests[i].setManager(&manager);
+        requests[i].setFetchHint(hint);
+    }
 
-        QElapsedTimer timer;
-        timer.start();
-        request.start();
-        request.waitForFinished();
-
-        qint64 elapsed = timer.elapsed();
-        qDebug() << i << ": Phone number lookup completed in " << elapsed << "ms";
-        elapsedTimeTotal += elapsed;
+    for (int i = 0; i < batchSize; ++i) {
+        requests[i].setFilter(QContactPhoneNumber::match("1570795326")); // arbitrary number
     }
     for (int i = 0; i < 3; ++i) {
+        QElapsedTimer timer;
+        timer.start();
+        for (int k = 0; k < batchSize; ++k) {
+            requests[k].start();
+        }
+        for (int k = 0; k < batchSize; ++k) {
+            requests[k].waitForFinished();
+        }
+
+        qint64 elapsed = timer.elapsed();
+        qDebug() << i << ":" << batchSize << "Phone number lookups completed in" << elapsed << "ms";
+        elapsedTimeTotal += elapsed;
+    }
+    for (int i = 0; i < batchSize; ++i) {
         QContactDetailFilter filter;
         filter.setDetailType(QContactEmailAddress::Type, QContactEmailAddress::FieldEmailAddress);
         filter.setMatchFlags(QContactFilter::MatchExactly | QContactFilter::MatchFixedString);
         filter.setValue("example@example.com");
 
-        request.setFilter(filter);
-
-        QElapsedTimer timer;
-        timer.start();
-        request.start();
-        request.waitForFinished();
-
-        qint64 elapsed = timer.elapsed();
-        qDebug() << i << ": Email address lookup completed in " << elapsed << "ms";
-        elapsedTimeTotal += elapsed;
+        requests[i].setFilter(filter);
     }
     for (int i = 0; i < 3; ++i) {
+        QElapsedTimer timer;
+        timer.start();
+        for (int k = 0; k < batchSize; ++k) {
+            requests[k].start();
+        }
+        for (int k = 0; k < batchSize; ++k) {
+            requests[k].waitForFinished();
+        }
+
+        qint64 elapsed = timer.elapsed();
+        qDebug() << i << ":" << batchSize << "Email address lookups completed in" << elapsed << "ms";
+        elapsedTimeTotal += elapsed;
+    }
+    for (int i = 0; i < batchSize; ++i) {
         QContactDetailFilter filter1;
         filter1.setDetailType(QContactOnlineAccount::Type, QContactOnlineAccount__FieldAccountPath);
         filter1.setValue("/example/jabber/0");
@@ -390,15 +410,20 @@ int main(int argc, char  *argv[])
         filter2.setMatchFlags(QContactFilter::MatchExactly | QContactFilter::MatchFixedString);
         filter2.setValue("example@example.com");
 
-        request.setFilter(filter1 & filter2);
-
+        requests[i].setFilter(filter1 & filter2);
+    }
+    for (int i = 0; i < 3; ++i) {
         QElapsedTimer timer;
         timer.start();
-        request.start();
-        request.waitForFinished();
+        for (int k = 0; k < batchSize; ++k) {
+            requests[k].start();
+        }
+        for (int k = 0; k < batchSize; ++k) {
+            requests[k].waitForFinished();
+        }
 
         qint64 elapsed = timer.elapsed();
-        qDebug() << i << ": Online account lookup completed in " << elapsed << "ms";
+        qDebug() << i << ":" << batchSize << "Online account lookups completed in" << elapsed << "ms";
         elapsedTimeTotal += elapsed;
     }
 
