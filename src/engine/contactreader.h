@@ -95,7 +95,7 @@ protected:
     QContactManager::Error queryContacts(
             const QString &table, QList<QContact> *contacts, const QContactFetchHint &fetchHint, bool relaxConstraints = false);
     QContactManager::Error queryContacts(
-            const QString &table, QList<QContact> *contacts, const QContactFetchHint &fetchHint, bool relaxConstraints, QSqlQuery &query, QSqlQuery &relationshipQuery);
+            const QString &table, QList<QContact> *contacts, const QContactFetchHint &fetchHint, bool relaxConstraints, ContactsDatabase::Query &query, ContactsDatabase::Query &relationshipQuery);
 
     virtual void contactsAvailable(const QList<QContact> &contacts);
     virtual void contactIdsAvailable(const QList<QContactId> &contactIds);

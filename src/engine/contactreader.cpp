@@ -1933,55 +1933,34 @@ QContactManager::Error ContactReader::queryContacts(
         "LEFT JOIN Relationships AS R2 ON R2.firstId = temp.%1.contactId "
         "ORDER BY contactId ASC").arg(tableName));
 
-    QSqlQuery contactQuery(m_database);
-    QSqlQuery relationshipQuery(m_database);
-
-    // Prepare the query for the contact properties
-    if (!contactQuery.prepare(idsQueryStatement)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare query for contact details:\n%1\nQuery:\n%2")
-                .arg(contactQuery.lastError().text())
-                .arg(idsQueryStatement));
+    ContactsDatabase::Query contactQuery(m_database.prepare(idsQueryStatement));
+    if (!ContactsDatabase::execute(contactQuery)) {
+        contactQuery.reportError("Failed to execute query for contact details");
         err = QContactManager::UnspecifiedError;
     } else {
-        contactQuery.setForwardOnly(true);
-        if (!ContactsDatabase::execute(contactQuery)) {
-            QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to execute query for contact details:\n%1\nQuery:\n%2")
-                    .arg(contactQuery.lastError().text())
-                    .arg(idsQueryStatement));
-            err = QContactManager::UnspecifiedError;
-        } else {
-            QContactFetchHint::OptimizationHints optimizationHints(fetchHint.optimizationHints());
-            const bool fetchRelationships((optimizationHints & QContactFetchHint::NoRelationships) == 0);
+        QContactFetchHint::OptimizationHints optimizationHints(fetchHint.optimizationHints());
+        const bool fetchRelationships((optimizationHints & QContactFetchHint::NoRelationships) == 0);
 
-            if (fetchRelationships) {
-                // Prepare the query for the contact relationships
-                if (!relationshipQuery.prepare(relationshipQueryStatement)) {
-                    QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare query for relationships:\n%1\nQuery:\n%2")
-                            .arg(relationshipQuery.lastError().text())
-                            .arg(relationshipQueryStatement));
-                    err = QContactManager::UnspecifiedError;
-                } else {
-                    relationshipQuery.setForwardOnly(true);
-                    if (!ContactsDatabase::execute(relationshipQuery)) {
-                        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare query for relationships:\n%1\nQuery:\n%2")
-                                .arg(relationshipQuery.lastError().text())
-                                .arg(relationshipQueryStatement));
-                        err = QContactManager::UnspecifiedError;
-                    } else {
-                        // Move to the first row
-                        relationshipQuery.next();
-                    }
-                }
-            }
+        ContactsDatabase::Query relationshipQuery;
 
-            if (err == QContactManager::NoError) {
-                err = queryContacts(tableName, contacts, fetchHint, relaxConstraints, contactQuery, relationshipQuery);
+        if (fetchRelationships) {
+            relationshipQuery = m_database.prepare(relationshipQueryStatement);
+            if (!ContactsDatabase::execute(relationshipQuery)) {
+                relationshipQuery.reportError("Failed to execute query for relationships");
+                err = QContactManager::UnspecifiedError;
+            } else {
+                // Move to the first row
+                relationshipQuery.next();
             }
+        }
 
-            contactQuery.finish();
-            if (fetchRelationships) {
-                relationshipQuery.finish();
-            }
+        if (err == QContactManager::NoError) {
+            err = queryContacts(tableName, contacts, fetchHint, relaxConstraints, contactQuery, relationshipQuery);
+        }
+
+        contactQuery.finish();
+        if (fetchRelationships) {
+            relationshipQuery.finish();
         }
     }
 
@@ -1989,7 +1968,7 @@ QContactManager::Error ContactReader::queryContacts(
 }
 
 QContactManager::Error ContactReader::queryContacts(
-        const QString &tableName, QList<QContact> *contacts, const QContactFetchHint &fetchHint, bool relaxConstraints, QSqlQuery &contactQuery, QSqlQuery &relationshipQuery)
+        const QString &tableName, QList<QContact> *contacts, const QContactFetchHint &fetchHint, bool relaxConstraints, ContactsDatabase::Query &contactQuery, ContactsDatabase::Query &relationshipQuery)
 {
     // Formulate the query to fetch the contact details
     const QString detailQueryTemplate(QString::fromLatin1(
@@ -2058,21 +2037,14 @@ QContactManager::Error ContactReader::queryContacts(
         detailQueryStatement = detailQueryStatement.arg(detailNameTemplate.arg(detailNameSpec.join(QLatin1String("','"))));
 
     // If selectSpec is empty, all required details are in the Contacts table
-    QSqlQuery detailQuery(m_database);
+    ContactsDatabase::Query detailQuery;
+
     if (!selectSpec.isEmpty()) {
-        if (!detailQuery.prepare(detailQueryStatement)) {
-            QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare query for joined details:\n%1\nQuery:\n%2")
-                    .arg(detailQuery.lastError().text())
-                    .arg(detailQueryStatement));
-            return QContactManager::UnspecifiedError;
-        }
+        detailQuery = m_database.prepare(detailQueryStatement);
 
         // Read the details for these contacts
-        detailQuery.setForwardOnly(true);
         if (!ContactsDatabase::execute(detailQuery)) {
-            QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare query for joined details:\n%1\nQuery:\n%2")
-                    .arg(detailQuery.lastError().text())
-                    .arg(detailQueryStatement));
+            detailQuery.reportError("Failed to execute query for joined details");
             return QContactManager::UnspecifiedError;
         } else {
             // Move to the first row
@@ -2367,22 +2339,13 @@ QContactManager::Error ContactReader::readDeletedContactIds(
         }
     }
 
-    QSqlQuery query(m_database);
-    query.setForwardOnly(true);
-    if (!query.prepare(queryStatement)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare deleted contacts ids:\n%1\nQuery:\n%2")
-                .arg(query.lastError().text())
-                .arg(queryStatement));
-        return QContactManager::UnspecifiedError;
-    }
+    ContactsDatabase::Query query(m_database.prepare(queryStatement));
 
     for (int i = 0; i < bindings.count(); ++i)
         query.bindValue(i, bindings.at(i));
 
     if (!ContactsDatabase::execute(query)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to query deleted contacts ids\n%1\nQuery:\n%2")
-                .arg(query.lastError().text())
-                .arg(queryStatement));
+        query.reportError("Failed to query deleted contacts ids");
         return QContactManager::UnspecifiedError;
     }
 
@@ -2450,22 +2413,13 @@ QContactManager::Error ContactReader::readContactIds(
         queryString.append(QString::fromLatin1(" ORDER BY ") + orderBy);
     }
 
-    QSqlQuery query(m_database);
-    query.setForwardOnly(true);
-    if (!query.prepare(queryString)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare contacts ids:\n%1\nQuery:\n%2")
-                .arg(query.lastError().text())
-                .arg(queryString));
-        return QContactManager::UnspecifiedError;
-    }
+    ContactsDatabase::Query query(m_database.prepare(queryString));
 
     for (int i = 0; i < bindings.count(); ++i)
         query.bindValue(i, bindings.at(i));
 
     if (!ContactsDatabase::execute(query)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to query contacts ids\n%1\nQuery:\n%2")
-                .arg(query.lastError().text())
-                .arg(queryString));
+        query.reportError("Failed to query contacts ids");
         return QContactManager::UnspecifiedError;
     } else {
         debugFilterExpansion("Contact IDs selection:", queryString, bindings);
@@ -2548,21 +2502,12 @@ QContactManager::Error ContactReader::readRelationships(
             "\n SELECT type, firstId, secondId"
             "\n FROM Relationships") + where + QLatin1String(";");
 
-    QSqlQuery query(m_database);
-    query.setForwardOnly(true);
-    if (!query.prepare(statement)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare relationships query:\n%1\nQuery:\n%2")
-                .arg(query.lastError().text())
-                .arg(statement));
-        return QContactManager::UnspecifiedError;
-    }
-
+    ContactsDatabase::Query query(m_database.prepare(statement));
     for (int i = 0; i < bindings.count(); ++i)
         query.bindValue(i, bindings.at(i));
 
     if (!ContactsDatabase::execute(query)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to query relationships: %1")
-                .arg(query.lastError().text()));
+        query.reportError("Failed to query relationships");
         return QContactManager::UnspecifiedError;
     }
 
@@ -2596,22 +2541,13 @@ bool ContactReader::fetchOOB(const QString &scope, const QStringList &keys, QMap
         statement.append(QString::fromLatin1("IN (%1)").arg(keyList));
     }
 
-    QSqlQuery query(m_database);
-    query.setForwardOnly(true);
-    if (!query.prepare(statement)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare OOB query:\n%1\nQuery:\n%2")
-                .arg(query.lastError().text())
-                .arg(statement));
-        return false;
-    }
-
+    ContactsDatabase::Query query(m_database.prepare(statement));
     foreach (const QVariant &name, keyNames) {
         query.addBindValue(name);
     }
 
     if (!ContactsDatabase::execute(query)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to query OOB: %1")
-                .arg(query.lastError().text()));
+        query.reportError("Failed to query OOB");
         return false;
     }
     while (query.next()) {
@@ -2645,18 +2581,9 @@ bool ContactReader::fetchOOBKeys(const QString &scope, QStringList *keys)
 {
     QString statement(QString::fromLatin1("SELECT name FROM OOB WHERE name LIKE '%1:%%'").arg(scope));
 
-    QSqlQuery query(m_database);
-    query.setForwardOnly(true);
-    if (!query.prepare(statement)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to prepare OOB query:\n%1\nQuery:\n%2")
-                .arg(query.lastError().text())
-                .arg(statement));
-        return false;
-    }
-
+    ContactsDatabase::Query query(m_database.prepare(statement));
     if (!ContactsDatabase::execute(query)) {
-        QTCONTACTS_SQLITE_WARNING(QString::fromLatin1("Failed to query OOB: %1")
-                .arg(query.lastError().text()));
+        query.reportError("Failed to query OOB");
         return false;
     }
     while (query.next()) {

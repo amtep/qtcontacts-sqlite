@@ -76,6 +76,7 @@ public:
         Query(const QSqlQuery &query);
 
     public:
+        Query() { }
         ~Query() { finish(); }
 
         void bindValue(const QString &id, const QVariant &value) { m_query.bindValue(id, value); }
