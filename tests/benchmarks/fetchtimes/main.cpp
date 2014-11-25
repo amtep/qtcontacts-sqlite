@@ -293,6 +293,7 @@ int main(int argc, char  *argv[])
     QElapsedTimer asyncTotalTimer;
     asyncTotalTimer.start();
 
+#if 0
     // Fetch all, no optimization hints
     for (int i = 0; i < 3; ++i) {
         QElapsedTimer timer;
@@ -350,6 +351,8 @@ int main(int argc, char  *argv[])
         qDebug() << i << ": Max count fetch completed in" << elapsed << "ms";
         elapsedTimeTotal += elapsed;
     }
+
+#endif
 
     // Time some address lookups
     const int batchSize = 20;
@@ -429,6 +432,7 @@ int main(int argc, char  *argv[])
 
     qint64 asyncTotalElapsed = asyncTotalTimer.elapsed();
 
+#if 0
     // Time some synchronous operations.  First, generate the test data.
     qsrand((int)asyncTotalElapsed);
     QList<int> nbrContacts;
@@ -1008,6 +1012,8 @@ int main(int argc, char  *argv[])
         morePrefillIds.append(morePrefillData.at(j).id());
     }
     manager.removeContacts(morePrefillIds);
+
+#endif
 
     qDebug() << "\n\nCumulative elapsed time:" << elapsedTimeTotal << "milliseconds";
     return 0;
