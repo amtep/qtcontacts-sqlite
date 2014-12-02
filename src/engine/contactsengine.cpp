@@ -232,6 +232,7 @@ public:
     void execute(ContactReader *reader, WriterProxy &)
     {
         QList<QContact> contacts;
+        contacts.reserve(10000);
         m_error = reader->readContacts(
                 QLatin1String("AsynchronousFilter"),
                 &contacts,
@@ -289,6 +290,7 @@ public:
     void execute(ContactReader *reader, WriterProxy &)
     {
         QList<QContactId> contactIds;
+        contactIds.reserve(10000);
         m_error = reader->readContactIds(&contactIds, m_filter, m_sorting);
     }
 
@@ -342,6 +344,7 @@ public:
     void execute(ContactReader *reader, WriterProxy &)
     {
         QList<QContact> contacts;
+        contacts.reserve(10000);
         m_error = reader->readContacts(
                 QLatin1String("AsynchronousIds"),
                 &contacts,
@@ -863,6 +866,7 @@ QList<QContactId> ContactsEngine::contactIds(
 {
     QList<QContactId> contactIds;
 
+    contactIds.reserve(10000);
     QContactManager::Error err = reader()->readContactIds(&contactIds, filter, sortOrders);
     if (error)
         *error = err;
@@ -877,6 +881,7 @@ QList<QContact> ContactsEngine::contacts(
 {
     QList<QContact> contacts;
 
+    contacts.reserve(10000);
     QContactManager::Error err = reader()->readContacts(
                 QLatin1String("SynchronousFilter"),
                 &contacts,
@@ -909,7 +914,7 @@ QList<QContact> ContactsEngine::contacts(
     Q_UNUSED(errorMap);
 
     QList<QContact> contacts;
-
+    contacts.reserve(10000);
     QContactManager::Error err = reader()->readContacts(
                 QLatin1String("SynchronousIds"),
                 &contacts,
